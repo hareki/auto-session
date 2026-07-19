@@ -29,8 +29,11 @@ function AutoSession.setup(config)
 
   require("auto-session.autocmds").setup_autocmds()
 
-  -- save argv
-  launch_argv = vim.fn.argv()
+  -- save argv, normalized to absolute paths so cwd changes don't break the
+  -- isdirectory() re-check in enabled_for_command_line_argv() at save time
+  launch_argv = vim.tbl_map(function(arg)
+    return vim.fn.fnamemodify(arg, ":p")
+  end, vim.fn.argv())
   Lib.logger.debug("Saving argv at setup: " .. vim.inspect(launch_argv))
 end
 
