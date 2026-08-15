@@ -1,6 +1,10 @@
 ---@diagnostic disable: inject-field
 local M = {}
 
+---@class AutoSession.CloseUnsupportedWindowsOpts
+---@field preserve_filetypes? string[]
+---@field preserve_buftypes? string[]
+
 ---@toc toc
 
 ---@mod auto-session.config Config
@@ -21,7 +25,7 @@ local M = {}
 ---@field allowed_dirs? table
 ---@field bypass_save_filetypes? table
 ---@field close_filetypes_on_save? table
----@field close_unsupported_windows? boolean
+---@field close_unsupported_windows? boolean|AutoSession.CloseUnsupportedWindowsOpts
 ---@field preserve_buffer_on_restore? fun(bufnr:number): preserve_buffer:boolean
 ---
 ---Git / Session naming
@@ -103,7 +107,7 @@ local defaults = {
   allowed_dirs = nil, -- Allow session restore/create in certain directories
   bypass_save_filetypes = nil, -- List of filetypes to bypass auto save when the only buffer open is one of the file types listed, useful to ignore dashboards
   close_filetypes_on_save = { "checkhealth" }, -- Buffers with matching filetypes will be closed before saving
-  close_unsupported_windows = true, -- Close windows that aren't backed by normal file before autosaving a session
+  close_unsupported_windows = true, -- Close windows that aren't backed by normal file before autosaving a session. Set preserve_filetypes/preserve_buftypes to keep selected unsupported windows open.
   preserve_buffer_on_restore = nil, -- Function that returns true if a buffer should be preserved when restoring a session
 
   -- Git / Session naming
@@ -121,8 +125,8 @@ local defaults = {
   restore_extra_data = nil, -- Function called when there's extra data saved for a session
 
   -- Argument handling
-  args_allow_single_directory = true, -- Follow normal session save/load logic if launched with a single directory as the only argument
-  args_allow_files_auto_save = false, -- Allow saving a session even when launched with a file argument (or multiple files/dirs). It does not load any existing session first. Can be true or a function that returns true when saving is allowed. See documentation for more detail
+  args_allow_single_directory = true, -- Follow normal session restore/save logic if launched with a single directory as the only argument. Set to false to skip auto-restore when any argument is passed to Neovim
+  args_allow_files_auto_save = false, -- Allow saving a session even when launched with a file argument (or multiple files/dirs). It does not re-enable auto-restore and can be true or a function that returns true when saving is allowed. See documentation for more detail
 
   -- Misc
   log_level = "error", -- Sets the log level of the plugin (debug, info, warn, error).

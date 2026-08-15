@@ -253,11 +253,11 @@ function Lib.is_legacy_file_name(file_name)
   return false
 end
 
----Returns a sstring with % characters escaped, suitable for use with vim cmds
+---Returns a string escaped for use in Ex commands with file paths
 ---@param str string The string to vim escape
 ---@return string The string escaped for use with vim.cmd
 function Lib.escape_string_for_vim(str)
-  return (str:gsub("%%", "\\%%"))
+  return vim.fn.fnameescape(str)
 end
 
 -- NOTE: expand has the side effect of canonicalizing the path
@@ -297,7 +297,16 @@ end
 
 ---Iterate over the tabpages and then the windows and close any window that has a buffer that isn't backed by
 ---a real file
-function Lib.close_unsupported_windows()
+---@param opts? boolean|AutoSession.CloseUnsupportedWindowsOpts
+function Lib.close_unsupported_windows(opts)
+  local preserve_filetypes = {}
+  local preserve_buftypes = {}
+
+  if type(opts) == "table" then
+    preserve_filetypes = opts.preserve_filetypes or {}
+    preserve_buftypes = opts.preserve_buftypes or {}
+  end
+
   local tabpages = vim.api.nvim_list_tabpages()
   for _, tabpage in ipairs(tabpages) do
     local windows = vim.api.nvim_tabpage_list_wins(tabpage)
@@ -312,8 +321,12 @@ function Lib.close_unsupported_windows()
         ---@cast buffer integer
         local file_name = vim.api.nvim_buf_get_name(buffer)
         local buf_type = vim.api.nvim_get_option_value("buftype", { buf = buffer })
+        local file_type = vim.api.nvim_get_option_value("filetype", { buf = buffer })
         -- Lib.logger.debug("file_name: " .. file_name .. " buf_type: " .. buf_type)
-        if vim.fn.filereadable(file_name) == 0 and buf_type ~= "terminal" then
+        local preserve_window = vim.tbl_contains(preserve_buftypes, buf_type)
+          or vim.tbl_contains(preserve_filetypes, file_type)
+
+        if vim.fn.filereadable(file_name) == 0 and buf_type ~= "terminal" and not preserve_window then
           Lib.logger.debug("closing window: " .. window .. " file_name: " .. file_name .. " buf_type: " .. buf_type)
 
           vim.api.nvim_win_close(window, true)
@@ -1031,6 +1044,29 @@ function Lib.has_modified_buffers()
   return false
 end
 
+---Gracefully close a buffer. Sends "exit" to snacks_terminal buffers so the
+---terminal job can shut down cleanly before force deleting the buffer
+---@param buf number buffer to close
+local function close_buffer(buf)
+  if vim.bo[buf].buftype == "terminal" and vim.bo[buf].filetype == "snacks_terminal" then
+    local job_id = vim.b[buf].terminal_job_id
+
+    if job_id and job_id > 0 then
+      pcall(vim.api.nvim_chan_send, job_id, "exit\n")
+      vim.fn.jobwait({ job_id }, 1000)
+      vim.wait(1000, function()
+        return not vim.api.nvim_buf_is_valid(buf)
+      end, 10)
+
+      if not vim.api.nvim_buf_is_valid(buf) then
+        return
+      end
+    end
+  end
+
+  vim.api.nvim_buf_delete(buf, { force = true })
+end
+
 ---Close any buffers that have a ft that is in ignored_filetypes
 ---@param ignored_filetypes table list of filetypes to close
 function Lib.close_ignored_filetypes(ignored_filetypes)
@@ -1045,8 +1081,7 @@ function Lib.close_ignored_filetypes(ignored_filetypes)
     if vim.api.nvim_buf_is_loaded(buf) then
       local buf_ft = vim.bo[buf].filetype
       if buf_ft and vim.tbl_contains(filetypes_to_ignore, buf_ft) then
-        vim.api.nvim_buf_delete(buf, { force = true })
-        break
+        close_buffer(buf)
       end
     end
   end

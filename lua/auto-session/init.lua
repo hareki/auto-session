@@ -341,7 +341,7 @@ function AutoSession.auto_save_session()
 
   if Config.close_unsupported_windows then
     -- Wrap in pcall in case there's an error while trying to close windows
-    local success, result = pcall(Lib.close_unsupported_windows)
+    local success, result = pcall(Lib.close_unsupported_windows, Config.close_unsupported_windows)
     if not success then
       Lib.logger.debug("Error closing unsupported windows: " .. result)
     end
@@ -561,6 +561,8 @@ function AutoSession.auto_restore_session_at_vim_enter()
   -- is important because some plugins (.e.g. NvimTree) rewrite the arguments before
   -- we get to see them
 
+  local restore_allowed_for_argv = enabled_for_command_line_argv(false)
+
   -- Is there exactly one argument and is it a directory?
   if
     Config.args_allow_single_directory
@@ -592,12 +594,12 @@ function AutoSession.auto_restore_session_at_vim_enter()
       Config.auto_save = false
     end
   else
-    if AutoSession.auto_restore_session(nil, true) then
+    if restore_allowed_for_argv and AutoSession.auto_restore_session(nil, true) then
       return true
     end
 
     -- Check to see if the last session feature is on
-    if Config.auto_restore_last_session then
+    if restore_allowed_for_argv and Config.auto_restore_last_session then
       Lib.logger.debug("Last session is enabled, checking for session")
       local last_session_name = Lib.get_latest_session(AutoSession.get_root_dir())
       if last_session_name then

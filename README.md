@@ -70,7 +70,7 @@ local defaults = {
   allowed_dirs = nil, -- Allow session restore/create in certain directories
   bypass_save_filetypes = nil, -- List of filetypes to bypass auto save when the only buffer open is one of the file types listed, useful to ignore dashboards
   close_filetypes_on_save = { "checkhealth" }, -- Buffers with matching filetypes will be closed before saving
-  close_unsupported_windows = true, -- Close windows that aren't backed by normal file before autosaving a session
+  close_unsupported_windows = true, -- Close windows that aren't backed by normal file before autosaving a session. Set preserve_filetypes/preserve_buftypes to keep selected unsupported windows open.
   preserve_buffer_on_restore = nil, -- Function that returns true if a buffer should be preserved when restoring a session
 
   -- Git / Session naming
@@ -88,8 +88,8 @@ local defaults = {
   restore_extra_data = nil, -- Function called when there's extra data saved for a session
 
   -- Argument handling
-  args_allow_single_directory = true, -- Follow normal session save/load logic if launched with a single directory as the only argument
-  args_allow_files_auto_save = false, -- Allow saving a session even when launched with a file argument (or multiple files/dirs). It does not load any existing session first. Can be true or a function that returns true when saving is allowed. See documentation for more detail
+  args_allow_single_directory = true, -- Follow normal session restore/save logic if launched with a single directory as the only argument. Set to false to skip auto-restore when any argument is passed to Neovim
+  args_allow_files_auto_save = false, -- Allow saving a session even when launched with a file argument (or multiple files/dirs). It does not re-enable auto-restore and can be true or a function that returns true when saving is allowed. See documentation for more detail
 
   -- Misc
   log_level = "error", -- Sets the log level of the plugin (debug, info, warn, error).
@@ -149,7 +149,7 @@ local defaults = {
 ---@field allowed_dirs? table
 ---@field bypass_save_filetypes? table
 ---@field close_filetypes_on_save? table
----@field close_unsupported_windows? boolean
+---@field close_unsupported_windows? boolean|AutoSession.CloseUnsupportedWindowsOpts
 ---@field preserve_buffer_on_restore? fun(bufnr:number): preserve_buffer:boolean
 ---
 ---Git / Session naming
@@ -263,6 +263,7 @@ Starting `nvim`
 - When starting `nvim` with no arguments, AutoSession will try to restore the session for `cwd` if one exists.
 - When starting `nvim .` (or another directory), AutoSession will try to restore the session for that directory. See [argument handling](https://github.com/rmagatti/auto-session/wiki/Argument-Handling) for more details.
 - When starting `nvim some_file.txt` (or multiple files), by default, AutoSession won't do anything. See [argument handling](https://github.com/rmagatti/auto-session/wiki/Argument-Handling) for more details.
+- Set `args_allow_single_directory = false` if you want startup restore to be skipped whenever any command-line argument is passed. `args_allow_files_auto_save` still only controls whether autosave is allowed for file or mixed arguments.
 - Even after starting `nvim` with a file argument, a session for `cwd` can still be manually restored by running `:AutoSession restore`.
 - When piping to `nvim`, e.g: `cat myfile | nvim`, AutoSession disables itself.
 
@@ -497,6 +498,10 @@ Command hooks exist in the format: {hook_name}
 - `{post_cwd_changed}`: executes _after_ a directory is changed (if `cwd_change_handling` is enabled)
 - `{save_extra}`: executes _after_ a session is saved, saves returned string or table to `*x.vim`, reference `:help mks`
 
+Note that returning `false` from `{pre_save}`/`{pre_restore}` only prevents an **automatic** save/restore on exit/startup. It does not cancel an explicitly invoked command like `:AutoSession save` or `:AutoSession restore`.
+
+Before reaching for these hooks to skip saving or restoring, check whether one of AutoSession's built-in options already handles the case declaratively: `bypass_save_filetypes` (e.g. skip saving dashboard-only sessions), `suppressed_dirs`/`allowed_dirs` (directory filtering), `auto_delete_empty_sessions` (empty sessions) and `close_filetypes_on_save` (buffers that shouldn't end up in the session). The cancellation hooks are best reserved for dynamic or project-specific conditions that can't be expressed through those options.
+
 Each hook is a table of vim commands or lua functions (or a mix of both). Here are some examples of what you can do:
 
 ```lua
@@ -532,6 +537,9 @@ opts = {
   },
 
   -- Save quickfix list and open it when restoring the session
+  close_unsupported_windows = {
+    preserve_buftypes = { "quickfix" },
+  },
   save_extra_cmds = {
     function()
       local qflist = vim.fn.getqflist()
@@ -542,8 +550,16 @@ opts = {
       local qfinfo = vim.fn.getqflist({ title = 1 })
 
       for _, entry in ipairs(qflist) do
-        -- use filename instead of bufnr so it can be reloaded
-        entry.filename = vim.api.nvim_buf_get_name(entry.bufnr)
+        -- use filename instead of bufnr so it can be reloaded. Entries with no
+        -- buffer (e.g. non-error lines from build output) have bufnr 0, which
+        -- would otherwise resolve to the current buffer, so leave them fileless
+        local bufnr = entry.bufnr
+        if type(bufnr) == "number" and bufnr > 0 and vim.api.nvim_buf_is_valid(bufnr) then
+          local filename = vim.api.nvim_buf_get_name(bufnr)
+          if filename ~= "" then
+            entry.filename = filename
+          end
+        end
         entry.bufnr = nil
       end
 
